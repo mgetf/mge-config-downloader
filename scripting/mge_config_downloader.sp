@@ -5,7 +5,7 @@
 #include <ripext>
 #include <mge>
 
-#define PLUGIN_VERSION "1.0.0"
+#define PLUGIN_VERSION "1.0.3"
 
 ConVar g_cvEnabled;
 ConVar g_cvUrl;
