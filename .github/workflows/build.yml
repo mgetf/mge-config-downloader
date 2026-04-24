@@ -1,0 +1,39 @@
+name: Autobuild
+
+on:
+  push:
+    tags:
+    - 'v*'
+
+jobs:
+  run:
+    name: Run action
+    runs-on: ubuntu-latest
+
+    if: "!contains(github.event.head_commit.message, '[ci skip]')"
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup SourcePawn Compiler
+      uses: rumblefrog/setup-sp@master
+      with:
+        version: "1.12.x"
+
+    - name: Compile plugin
+      run: |
+        spcomp -i"./scripting/include/" scripting/mge_config_downloader.sp -o ./plugins/mge_config_downloader.smx
+
+    - name: Zip package
+      run: |
+        mkdir build
+        7za a -r build/mge_config_downloader.zip plugins/ scripting/
+
+    - name: Release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: |
+          ./build/mge_config_downloader.zip
+        fail_on_unmatched_files: true
+        generate_release_notes: true
