@@ -32,7 +32,7 @@ public void OnPluginStart()
     );
     g_cvUrl = CreateConVar(
         "mgemod_autodownload_url",
-        "https://raw.githubusercontent.com/mgetf/MGEMod/main/addons/sourcemod/configs/mge/%s.cfg",
+        "https://raw.githubusercontent.com/mgetf/MGEMod/refs/heads/master/addons/sourcemod/configs/mge/%s.cfg",
         "URL template used to download configs. %%s is replaced with the map name."
     );
     g_cvNotify = CreateConVar(
