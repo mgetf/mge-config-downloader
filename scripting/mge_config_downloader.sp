@@ -5,7 +5,7 @@
 #include <ripext>
 #include <mge>
 
-#define PLUGIN_VERSION "1.0.3"
+#define PLUGIN_VERSION "1.1"
 
 ConVar g_cvEnabled;
 ConVar g_cvUrl;
@@ -78,6 +78,8 @@ void OnDownloadComplete(HTTPStatus status, any value)
             DeleteFile(g_sPendingPath);
         if (g_cvNotify.BoolValue)
             PrintToChatAll("[SM] Failed to download config for %s (status %d) - map not supported.", g_sPendingMap, status);
+        if (GetFeatureStatus(FeatureType_Native, "MGE_ReportConfigUnavailable") == FeatureStatus_Available)
+            MGE_ReportConfigUnavailable();
         return;
     }
 
@@ -88,6 +90,8 @@ void OnDownloadComplete(HTTPStatus status, any value)
         DeleteFile(g_sPendingPath);
         if (g_cvNotify.BoolValue)
             PrintToChatAll("[SM] Invalid config downloaded for %s - map not supported.", g_sPendingMap);
+        if (GetFeatureStatus(FeatureType_Native, "MGE_ReportConfigUnavailable") == FeatureStatus_Available)
+            MGE_ReportConfigUnavailable();
         return;
     }
 
