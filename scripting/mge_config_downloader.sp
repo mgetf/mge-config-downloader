@@ -5,7 +5,7 @@
 #include <ripext>
 #include <mge>
 
-#define PLUGIN_VERSION "1.1"
+#define PLUGIN_VERSION "1.2"
 
 ConVar g_cvEnabled;
 ConVar g_cvUrl;
@@ -13,6 +13,7 @@ ConVar g_cvNotify;
 
 char g_sPendingMap[PLATFORM_MAX_PATH];
 char g_sPendingPath[PLATFORM_MAX_PATH];
+bool g_bDownloadInProgress;
 
 public Plugin myinfo =
 {
@@ -41,7 +42,38 @@ public void OnPluginStart()
         FCVAR_NONE, true, 0.0, true, 1.0
     );
 
+    RegAdminCmd("sm_mge_config_redownload", Command_RedownloadConfig, ADMFLAG_ROOT,
+        "Force redownload of MGE config for a map. Usage: sm_mge_config_redownload [mapname]");
+
     AutoExecConfig(true, "mgemod_config_downloader");
+}
+
+public Action Command_RedownloadConfig(int client, int args)
+{
+    if (g_bDownloadInProgress)
+    {
+        ReplyToCommand(client, "[MGE] A config download is already in progress.");
+        return Plugin_Handled;
+    }
+
+    char mapName[PLATFORM_MAX_PATH];
+    if (args >= 1)
+        GetCmdArg(1, mapName, sizeof(mapName));
+    else
+        GetCurrentMap(mapName, sizeof(mapName));
+
+    char configPath[PLATFORM_MAX_PATH];
+    BuildPath(Path_SM, configPath, sizeof(configPath), "configs/mge/%s.cfg", mapName);
+
+    if (FileExists(configPath))
+    {
+        DeleteFile(configPath);
+        LogMessage("Deleted existing config for '%s' (forced redownload by %L)", mapName, client);
+    }
+
+    ReplyToCommand(client, "[MGE] Redownloading config for %s...", mapName);
+    StartDownload(mapName, configPath);
+    return Plugin_Handled;
 }
 
 public Action MGE_OnMapConfigMissing(const char[] mapName, const char[] configPath)
@@ -49,8 +81,47 @@ public Action MGE_OnMapConfigMissing(const char[] mapName, const char[] configPa
     if (!g_cvEnabled.BoolValue)
         return Plugin_Continue;
 
+    if (g_bDownloadInProgress)
+    {
+        LogError("Download already in progress, cannot handle missing config for '%s'.", mapName);
+        return Plugin_Continue;
+    }
+
+    if (g_cvNotify.BoolValue)
+        PrintToChatAll("[SM] Downloading config for map %s...", mapName);
+
+    StartDownload(mapName, configPath);
+    return Plugin_Handled;
+}
+
+public Action MGE_OnMapConfigInvalid(const char[] mapName, const char[] configPath)
+{
+    if (!g_cvEnabled.BoolValue)
+        return Plugin_Continue;
+
+    if (g_bDownloadInProgress)
+    {
+        LogError("Download already in progress, cannot handle invalid config for '%s'.", mapName);
+        return Plugin_Continue;
+    }
+
+    LogMessage("Config for '%s' failed to parse, deleting and redownloading.", mapName);
+
+    if (FileExists(configPath))
+        DeleteFile(configPath);
+
+    if (g_cvNotify.BoolValue)
+        PrintToChatAll("[SM] Config for map %s is invalid, redownloading...", mapName);
+
+    StartDownload(mapName, configPath);
+    return Plugin_Handled;
+}
+
+void StartDownload(const char[] mapName, const char[] configPath)
+{
     strcopy(g_sPendingMap, sizeof(g_sPendingMap), mapName);
     strcopy(g_sPendingPath, sizeof(g_sPendingPath), configPath);
+    g_bDownloadInProgress = true;
 
     char sUrlTemplate[512];
     g_cvUrl.GetString(sUrlTemplate, sizeof(sUrlTemplate));
@@ -62,15 +133,12 @@ public Action MGE_OnMapConfigMissing(const char[] mapName, const char[] configPa
 
     HTTPRequest hRequest = new HTTPRequest(sUrl);
     hRequest.DownloadFile(configPath, OnDownloadComplete);
-
-    if (g_cvNotify.BoolValue)
-        PrintToChatAll("[SM] Downloading config for map %s...", mapName);
-
-    return Plugin_Handled;
 }
 
 void OnDownloadComplete(HTTPStatus status, any value)
 {
+    g_bDownloadInProgress = false;
+
     if (status != HTTPStatus_OK)
     {
         LogError("Failed to download config for map '%s' (HTTP status: %d)", g_sPendingMap, status);
@@ -90,6 +158,22 @@ void OnDownloadComplete(HTTPStatus status, any value)
         DeleteFile(g_sPendingPath);
         if (g_cvNotify.BoolValue)
             PrintToChatAll("[SM] Invalid config downloaded for %s - map not supported.", g_sPendingMap);
+        if (GetFeatureStatus(FeatureType_Native, "MGE_ReportConfigUnavailable") == FeatureStatus_Available)
+            MGE_ReportConfigUnavailable();
+        return;
+    }
+
+    KeyValues kv = new KeyValues("SpawnConfigs");
+    bool bParsed = kv.ImportFromFile(g_sPendingPath);
+    bool bHasArenas = bParsed && kv.GotoFirstSubKey();
+    delete kv;
+
+    if (!bParsed || !bHasArenas)
+    {
+        LogError("Downloaded config for map '%s' is malformed (parsed=%d, hasArenas=%d) - discarding.", g_sPendingMap, bParsed, bHasArenas);
+        DeleteFile(g_sPendingPath);
+        if (g_cvNotify.BoolValue)
+            PrintToChatAll("[SM] Downloaded config for %s is malformed - map not supported.", g_sPendingMap);
         if (GetFeatureStatus(FeatureType_Native, "MGE_ReportConfigUnavailable") == FeatureStatus_Available)
             MGE_ReportConfigUnavailable();
         return;
