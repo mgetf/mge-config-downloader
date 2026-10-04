@@ -5,7 +5,7 @@
 #include <ripext>
 #include <mge>
 
-#define PLUGIN_VERSION "1.3"
+#define PLUGIN_VERSION "1.4"
 
 ConVar g_cvEnabled;
 ConVar g_cvSync;
@@ -19,6 +19,9 @@ char g_sSkipSyncMap[PLATFORM_MAX_PATH];
 bool g_bDownloadInProgress;
 bool g_bMgeWaiting;
 bool g_bForceReplace;
+bool g_bReportIfUnchanged;
+bool g_bRedownloadFromConsole;
+int g_iRedownloadUserId;
 
 public Plugin myinfo =
 {
@@ -87,6 +90,9 @@ public Action Command_RedownloadConfig(int client, int args)
 
     g_sSkipSyncMap[0] = '\0';
     g_bForceReplace = true;
+    g_bReportIfUnchanged = true;
+    g_bRedownloadFromConsole = (client == 0);
+    g_iRedownloadUserId = (client > 0) ? GetClientUserId(client) : 0;
 
     ReplyToCommand(client, "[MGE] Redownloading config for %s...", mapName);
     StartDownload(mapName, configPath);
@@ -188,7 +194,13 @@ void OnDownloadComplete(HTTPStatus status, any value)
 {
     g_bDownloadInProgress = false;
     bool forceReplace = g_bForceReplace;
+    bool reportUnchanged = g_bReportIfUnchanged;
+    bool fromConsole = g_bRedownloadFromConsole;
+    int redownloadUserId = g_iRedownloadUserId;
     g_bForceReplace = false;
+    g_bReportIfUnchanged = false;
+    g_bRedownloadFromConsole = false;
+    g_iRedownloadUserId = 0;
 
     if (status != HTTPStatus_OK)
     {
@@ -206,10 +218,16 @@ void OnDownloadComplete(HTTPStatus status, any value)
     }
 
     bool hasLocal = FileExists(g_sPendingDest);
-    if (hasLocal && !forceReplace && FilesAreIdentical(g_sPendingTemp, g_sPendingDest))
+    if (hasLocal && FilesAreIdentical(g_sPendingTemp, g_sPendingDest))
     {
         LogMessage("Local config for '%s' already matches GitHub (%d bytes).", g_sPendingMap, FileSize(g_sPendingDest));
         DiscardTemp();
+        if (reportUnchanged)
+        {
+            char message[192];
+            Format(message, sizeof(message), "[MGE] Cloud config for %s is identical to the local file. Not overwriting or reloading the map.", g_sPendingMap);
+            ReplyToRedownload(fromConsole, redownloadUserId, message);
+        }
         return;
     }
 
@@ -370,6 +388,19 @@ bool FilesAreIdentical(const char[] pathA, const char[] pathB)
     delete fa;
     delete fb;
     return identical;
+}
+
+void ReplyToRedownload(bool fromConsole, int userId, const char[] message)
+{
+    if (fromConsole)
+    {
+        ReplyToCommand(0, "%s", message);
+        return;
+    }
+
+    int client = GetClientOfUserId(userId);
+    if (client)
+        ReplyToCommand(client, "%s", message);
 }
 
 void DiscardTemp()
